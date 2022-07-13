@@ -1,2 +1,2 @@
-# exploring-algorithms-datastructures
+= Study Algorithms and Data Structures
 Exploring and implementing different Algorithms and Datastructure with different languages
