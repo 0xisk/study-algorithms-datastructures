@@ -18,5 +18,13 @@ template MerkleTreeInclusionProof(n) {
     signal input path_index[n]; // path index are 0's and 1's indicating whether the current element is on the left or right
     signal output root; // note that this is an OUTPUT signal
 
+    component hashers[n];
+
     //[assignment] insert your code here to compute the root from a leaf and elements along the path
+    for (var i = 0; i < n; i++) {
+        // TODO: Needs more clarification
+        path_index[i] * (1 - path_index[i]) === 0;
+
+        
+    }
 }

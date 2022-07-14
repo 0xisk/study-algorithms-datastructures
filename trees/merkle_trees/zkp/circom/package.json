@@ -1,0 +1,23 @@
+{
+  "name": "circom",
+  "version": "1.0.0",
+  "description": "= Merkle Trees (ZKP DSL Circom Implementation) :toc:  :toclevels: 2",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@nomiclabs/hardhat-ethers": "^2.0.5",
+    "@nomiclabs/hardhat-waffle": "^2.0.3",
+    "chai": "^4.3.6",
+    "circomlib": "^2.0.3",
+    "circomlibjs": "^0.1.2",
+    "ethereum-waffle": "^3.4.4",
+    "ethers": "^5.6.4",
+    "hardhat": "^2.9.3",
+    "snarkjs": "^0.4.22"
+  }
+}
