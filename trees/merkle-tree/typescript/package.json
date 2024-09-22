@@ -3,6 +3,8 @@
   "devDependencies": {
     "@biomejs/biome": "^1.8.3",
     "@types/jest": "^29.5.13",
+    "@types/levelup": "^5.1.5",
+    "@types/memdown": "^3.0.5",
     "barrelsby": "^2.8.1",
     "bun-types": "^1.0.9",
     "concurrently": "^8.2.2",
@@ -29,5 +31,10 @@
     "start.prod": "bun dist/src/index.js",
     "test": "bun test --coverage",
     "test.watch": "bun test --watch"
+  },
+  "dependencies": {
+    "crypto": "^1.0.1",
+    "levelup": "^5.1.1",
+    "memdown": "^6.1.1"
   }
 }
