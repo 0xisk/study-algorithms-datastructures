@@ -21,8 +21,13 @@ export async function getTree(db: LevelUp): Promise<Buffer[][] | undefined> {
     const serializedTree: string[][] = JSON.parse(jsonTree.toString())
 
     return serializedTree.map(layer => layer.map(element => Buffer.from(element, 'base64')))
-  } catch (error) {
+  } catch (error: any) {
+    if (error.notFound) {
+      console.warn('Tree not found in the database, returning undefined')
+      return undefined
+    }
+
     console.error('Error retrieving tree from the database:', error)
-    throw error
+    return undefined
   }
 }

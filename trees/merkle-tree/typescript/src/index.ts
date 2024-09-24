@@ -38,6 +38,7 @@ interface IMerkleTree {
    *     d3:   [ ]         [ ]          [*]         [*]           [ ]         [ ]          [ ]        [ ]
    */
   getHashPath(index: number): Promise<HashPath>
+  getHashPath2(index: number): Promise<HashPath>
 
   /**
    * Verifies the validity of the proof
@@ -63,39 +64,8 @@ export class MerkleTree implements IMerkleTree {
   constructor(private db: LevelUp, private name: string, private depth: number, root?: Buffer) {
     if (!(depth >= 1 && depth <= MAX_DEPTH))
       throw Error('Bad depth')
-
-    const numLeaves = Math.pow(2, this.depth)
-    let leaves: Buffer[] = []
-
-    this.db.get(Buffer.from('tree'), async (err, storedTree: Buffer[][] | undefined) => {
-      if (!storedTree) {
-        for (let i = 0; i < numLeaves; i++) {
-          console.log('Leaf', i)
-          leaves.push(Buffer.alloc(64, 0))
-        }
-
-        let tree: Buffer[][] = []
-
-        // Build an empty tree of zero
-        let currentLayer: Buffer[] = leaves
-        let nextLayer: Buffer[] = []
-        tree.push(leaves)
-        for (let i = 1; i < this.depth; i++) {
-          for (let j = 0; j < currentLayer.length; j += 2) {
-            console.log('currentLayer ', j)
-            let parent = this.hasher.compress(currentLayer[j]!, currentLayer[j + 1]!)
-            nextLayer.push(parent)
-          }
-
-          tree.push(nextLayer)
-          currentLayer = nextLayer
-        }
-
-        this.root = tree[this.depth - 1]![0]!
-
-        saveTree(this.db, tree).catch((error) => console.error(error))
-      }
-    })
+    if (root)
+      this.root = root
   }
 
   /**
@@ -103,16 +73,34 @@ export class MerkleTree implements IMerkleTree {
    * The `db` contains the tree data.
    */
   static async new(db: LevelUp, name: string, depth = MAX_DEPTH) {
-    const meta: Buffer = await db.get(Buffer.from(name)).catch(() => {})
+    const meta: Buffer = await db.get(Buffer.from(name)).catch(() => { })
     if (meta) {
       const root = meta.slice(0, 32)
       const depth = meta.readUInt32LE(32)
-      return new MerkleTree(db, name, depth, root)
+      const tree = new MerkleTree(db, name, depth, root)
+      return tree
     } else {
       const tree = new MerkleTree(db, name, depth)
-      await tree.writeMetaData()
+      await tree.createEmptyTree()
       return tree
     }
+  }
+
+  private async createEmptyTree() {
+    let tree: Buffer[][] = []
+    let defaultNode = this.hasher.hash(Buffer.alloc(LEAF_BYTES))
+
+    for (let i = 0; i < this.depth; i++) {
+      let parent = this.hasher.compress(defaultNode, defaultNode);
+      await this.db.put(parent, Buffer.concat([defaultNode, defaultNode]))
+      tree.push([parent])
+      defaultNode = parent
+    }
+
+    this.root = tree[tree.length - 1]![0]!
+
+    // Update tree meta
+    await this.writeMetaData()
   }
 
   private async writeMetaData(batch?: LevelUpChain<string, Buffer>) {
@@ -129,69 +117,191 @@ export class MerkleTree implements IMerkleTree {
     return this.root
   }
 
-  async getHashPath(index: number): Promise<HashPath> {
-    if (index >= Math.pow(2, this.depth))
-      throw Error('No enough space in the thee')
+  //
+  async getHashPath2(index: number): Promise<HashPath> {
+    let hashPath: Buffer[][] = [];
+    let currentNode = this.root;
+    let layer = this.depth;
 
-    let tree = await getTree(this.db)
-    if (tree == undefined)
-      throw Error('Please construct the tree')
+    for (let i = layer - 1; i >= 0; i--) {
+      // If:
+      // (case 1) Data = 64; That means both nodes at leyer[i] are not empty, so we will fill them into the hashPath 
+      // (case 2) Data = 65; That means one of the subtrees is a stump 
+      // (case 3) Data = 0;  That means we reached at the level where both subtrees are completely empty. We use a pre-computed zero hash to fill the path.
+      let data = await this.db.get(currentNode).catch(() => Buffer.alloc(0))
 
-    let currentIndex = index
-    let path: Buffer[][] = []
+      // Case 1
+      if (data.length === 64) {
+        let [leftChild, rightChild] = [data.slice(0, 32), data.slice(32, 64)];
+        hashPath.push([leftChild, rightChild])
 
-    // Insert the path
-    for (let i = 0; i < tree.length; i++) {
-      let isLeftNode = currentIndex % 2 == 0
+        if (this.isLeftNode(index, layer)) {
+          currentNode = leftChild;
+        } else {
+          currentNode = rightChild
+        }
+      }
 
-      if (isLeftNode)
-        path.push([tree[i]![currentIndex]!, tree[i]![currentIndex + 1]!])
-      else
-        path.push([tree[i]![currentIndex - 1]!, tree[i]![currentIndex]!])
+      // Case 2
+      if (data.length === 65) {
+        throw new Error("NOT SUPPORTED")
+      }
+
+      // Case 3 
+      if (data.length === 0) {
+        throw new Error("NOT SUPPORTED")
+      }
+
+      layer = layer - 1
     }
 
-    return new HashPath(path)
+    // You need to reverse the array since we are looping from top/down and the expected tests are written bottom up.
+    return new HashPath(hashPath.reverse())
+  }
+
+  async getHashPath(index: number): Promise<HashPath> {
+    let hashPath: Buffer[][] = [];
+    let currentNode = this.root; // Start from the root
+    let currentLayer = this.depth;
+
+    // Traverse the tree from the root to the leaf
+    for (let i = currentLayer - 1; i >= 0; i--) {
+      // Read the data from the current node
+      let data = await this.db.get(currentNode).catch(() => Buffer.alloc(0));
+
+      if (data.length === 64) {
+        // Step 3: Regular internal node (both left and right subtrees are non-empty)
+        const leftChild = data.slice(0, 32);
+        const rightChild = data.slice(32, 64);
+
+        // Fill in the hash path for this level with the left and right children
+        hashPath.push([leftChild, rightChild]);
+
+        // Recursively move down to the next level
+        if (this.isLeftNode(index, i)) {
+          currentNode = leftChild;
+        } else {
+          currentNode = rightChild;
+        }
+      } else if (data.length === 65) {
+        // Step 4: We've reached a stump node
+        const filledLeaf = data.slice(0, 64);  // The leaf value in the stump
+        const storedIndex = data.readUInt32BE(64);  // The index stored in the stump
+
+        // Fill in the hash path with the reconstructed subtree information
+        hashPath.push([filledLeaf]);
+
+        if (storedIndex === index) {
+          // If the stored index matches the index we are looking for, break early
+          break;
+        } else {
+          // Fork the stump if necessary (keep traversing)
+          currentNode = this.computeZeroRoot(i - 1); // Use zero hashes for the remaining layers
+        }
+      } else if (data.length === 0) {
+        // Step 5: We've reached an empty subtree, fill with zero hashes
+        hashPath.push([this.computeZeroRoot(i - 1), this.computeZeroRoot(i - 1)]);
+        break;  // No need to continue further as the rest of the path is zero hashes
+      }
+    }
+
+    return new HashPath(hashPath);  // Return the collected hash path
+  }
+
+  // Helper function to compute zero root
+  private computeZeroRoot(layer: number): Buffer {
+    let zeroHash = this.hasher.hash(Buffer.alloc(64)); // 64 zero bytes
+    for (let i = 0; i < layer; i++) {
+      zeroHash = this.hasher.compress(zeroHash, zeroHash);
+    }
+    return zeroHash;
+  }
+
+  private async recursiveUpdateElement(parent: Buffer, value: Buffer, index: number, layer: number): Promise<Buffer> {
+    const data = await this.db.get(parent).catch(() => Buffer.alloc(0));;
+
+    console.log("Data", data.length)
+    // Case 1: Empty 
+    if (data.length === 0) {
+      const indexedBuffer = Buffer.alloc(32);
+      indexedBuffer.writeUint32LE(index, 0);
+      const hashedValue = this.hasher.hash(value);
+      console.log("hashedValue", hashedValue.length)
+      const stumpFlag = Buffer.from([1]); // Boolean "true" in 1 byte
+
+      const stumpNode = Buffer.concat([hashedValue, indexedBuffer, stumpFlag]);
+      console.log("stumpNode", stumpNode.length)
+
+      return stumpNode
+    }
+
+    // Case 2:
+    if (data.length === 65) {
+      // Extract the 32-byte value
+      const existingValue = data.slice(0, 32);
+
+      const storedIndex = data.readUInt32LE(32);
+
+      const stumpFlag = data.readUInt8(36);
+      console.log("stumpFlag", stumpFlag === 1 ? true : false);
+
+      if (storedIndex === index) {
+        const hashedValue = this.hasher.hash(value);
+        return hashedValue
+      } else {
+        const hashedValue = this.hasher.hash(value);
+
+        const leftChild = storedIndex < index
+          ? existingValue
+          : hashedValue;
+
+        const rightChild = storedIndex < index
+          ? hashedValue
+          : existingValue;
+
+        const newParentHash = this.hasher.compress(leftChild, rightChild);
+        return newParentHash;
+      }
+    }
+
+    if (data.length === 64) {
+      const [leftChild, rightChild] = [data.slice(0, 32), data.slice(32, 64)];
+
+      if (this.isLeftNode(index, layer)) {
+        const updatedLeft = await this.recursiveUpdateElement(leftChild, value, index, layer - 1)
+
+        
+        const parent = this.hasher.compress(updatedLeft.slice(0, 32), rightChild)
+        await this.db.put(parent, Buffer.concat([updatedLeft.slice(0, 32), rightChild]))
+        return parent
+      } else {
+        const updatedRight = await this.recursiveUpdateElement(rightChild, value, index, layer - 1)
+        const parent = this.hasher.compress(leftChild, updatedRight.slice(0, 32))
+        await this.db.put(parent, Buffer.concat([leftChild, updatedRight.slice(0, 32)]))
+        return parent
+
+      }
+    }
+
+    throw new Error('Unexpected data format');
+  }
+
+  private async function saveLeaf(leaf: Buffer) {
+    // This is a stump
+    if (leaf.length === 65) {
+      return this.hasher()
+    }
+  }
+
+  private isLeftNode(index: number, layer: number): Boolean {
+    return Math.floor(index / Math.pow(2, layer - 1)) % 2 === 0
   }
 
   async updateElement(index: number, value: Buffer): Promise<Buffer> {
-    if (index >= Math.pow(2, this.depth))
-      throw Error('No enough space in the thee')
+    this.root = await this.recursiveUpdateElement(this.root, value, index, this.depth)
 
-    let tree = await getTree(this.db)
-    console.log('tree', tree)
-    if (tree === undefined)
-      throw Error('Please construct the tree')
-
-    let currentIndex = index
-    let newParent = value
-
-    // Loop over all layers of the tree
-    for (let i = 0; i < tree.length; i++) {
-      // 1. Update tree with the new element value in that index
-      tree[i]![currentIndex] = newParent
-
-      // 2. Check if that index is left or right
-      // If left: hash(index, index + 1)
-      // If right: hash(index - 1, index)
-      let isLeftNode = currentIndex % 2 == 0
-
-      // 3. Update the parent of the updated element with its sibling.
-      if (isLeftNode)
-        newParent = this.hasher.compress(tree[i]![currentIndex]!, tree[i]![currentIndex + 1]!)
-      else
-        newParent = this.hasher.compress(tree[i]![currentIndex - 1]!, tree[i]![currentIndex]!)
-
-      currentIndex = Math.floor(currentIndex / 2)
-    }
-
-    let max = tree.length - 1
-
-    // Get the latest updated root
-    this.root = tree[max]![0]!
-
-    console.log('Updated tree', max)
-
-    await saveTree(this.db, tree)
+    // Update the tree
+    await this.writeMetaData();
 
     return this.root
   }

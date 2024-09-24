@@ -1,0 +1,18 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Debug Bun Tests",
+        "type": "pwa-node",
+        "request": "launch",
+        "runtimeExecutable": "/home/isk/.bun/bin/bun",  // Bun is globally available
+        "args": ["test"],
+        "cwd": "/run/media/isk/9f7168ae-948f-4a31-8e97-22e390ef4a0e/iskander/Projects/study-algorithms-datastructures/trees/merkle-tree/typescript",
+        "outputCapture": "std",
+        "sourceMaps": true,
+        "skipFiles": ["<node_internals>/**"],
+        "console": "integratedTerminal"
+      }
+    ]
+  }
+  
